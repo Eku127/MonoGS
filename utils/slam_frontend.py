@@ -53,6 +53,26 @@ class FrontEnd(mp.Process):
         self.kf_interval = self.config["Training"]["kf_interval"]
         self.window_size = self.config["Training"]["window_size"]
         self.single_thread = self.config["Training"]["single_thread"]
+    
+    def calculate_percentile(self, data, percentile):
+        data_sorted = sorted(data)
+        n = len(data_sorted)
+        index = (n - 1) * percentile
+        if index.is_integer():
+            return data_sorted[int(index)]
+        else:
+            lower_index = int(index // 1)
+            upper_index = lower_index + 1
+            lower_value = data_sorted[lower_index]
+            upper_value = data_sorted[upper_index]
+            return lower_value + (upper_value - lower_value) * (index - lower_index)
+        
+    def calculate_average(self, numbers):
+        if len(numbers) == 0:
+            return 0  # Avoid division by zero if the list is empty
+        else:
+            total = sum(numbers)
+            return total / len(numbers)
 
     def add_new_keyframe(self, cur_frame_idx, depth=None, opacity=None, init=False):
         rgb_boundary_threshold = self.config["Training"]["rgb_boundary_threshold"]
@@ -328,6 +348,8 @@ class FrontEnd(mp.Process):
         projection_matrix = projection_matrix.to(device=self.device)
         tic = torch.cuda.Event(enable_timing=True)
         toc = torch.cuda.Event(enable_timing=True)
+        
+        calc_track_time = []
 
         while True:
             if self.q_vis2main.empty():
@@ -389,7 +411,16 @@ class FrontEnd(mp.Process):
                 )
 
                 # Tracking
+                
+                one_track_start_time = time.time();
                 render_pkg = self.tracking(cur_frame_idx, viewpoint)
+                one_track_end_time = time.time();
+                # print("Tracking Here, frame_id: ", cur_frame_idx, " time: ", (one_track_end_time - one_track_start_time))
+                calc_track_time.append(one_track_end_time - one_track_start_time)
+                if len(calc_track_time) > 10:
+                    get_track_time = self.calculate_percentile(calc_track_time, 0.9)
+                    get_avg_time = self.calculate_average(calc_track_time)
+                    # print(f"Track Time 90th: {get_track_time:.5f}, Avg: {get_avg_time:.5f}")
 
                 current_window_dict = {}
                 current_window_dict[self.current_window[0]] = self.current_window[1:]
